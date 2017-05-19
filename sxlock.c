@@ -72,7 +72,7 @@ static Bool  opt_hidelength;
 /* need globals for signal handling */
 Display *dpy;
 Dpms dpms_original = { .state = True, .level = 0, .standby = 600, .suspend = 600, .off = 600 };  // holds original values
-int dpms_timeout = 10;  // dpms timeout until program exits
+int dpms_timeout = 1000;  // dpms timeout until program exits
 Bool using_dpms;
 
 pam_handle_t *pam_handle;
@@ -188,9 +188,11 @@ main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char pas
             x = base_x - XTextWidth(font, username, strlen(username)) / 2;
             XDrawString(dpy, w, gc, x, base_y - 10, username, strlen(username));
             XDrawLine(dpy, w, gc, line_x_left, base_y, line_x_right, base_y);
+            XDrawLine(dpy, w, gc, line_x_left, base_y, 0, info->output_height);
+            XDrawLine(dpy, w, gc, line_x_right, base_y, info->output_width, 0);
 
             /* clear old passdisp */
-            XClearArea(dpy, w, info->output_x, base_y + 20, info->output_width, ascent + descent, False);
+            //XClearArea(dpy, w, info->output_x, base_y + 20, info->output_width, ascent + descent, False);
 
             /* draw new passdisp or 'auth failed' */
             if (failed) {
@@ -203,7 +205,7 @@ main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char pas
                 if (hidelength && len > 0)
                     lendisp += (passdisp[len] * len) % 5;
                 x = base_x - XTextWidth(font, passdisp, lendisp) / 2;
-                XDrawString(dpy, w, gc, x, base_y + ascent + 20, passdisp, lendisp % 256);
+                // XDrawString(dpy, w, gc, x, base_y + ascent + 20, passdisp, lendisp % 256);
             }
         }
 
