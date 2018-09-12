@@ -60,6 +60,18 @@ typedef struct WindowPositionInfo {
     int output_width, output_height;
 } WindowPositionInfo;
 
+typedef struct Rect {
+    short x, y, size;
+    Bool enabled;
+} Rect;
+
+typedef struct Amalgam {
+    Window w;
+    WindowPositionInfo *info;
+    int line_x_left, base_y;
+    GC *gcs;
+} Amalgam;
+
 static int conv_callback(int num_msgs, const struct pam_message **msg, struct pam_response **resp, void *appdata_ptr);
 
 
@@ -74,6 +86,7 @@ Display *dpy;
 Dpms dpms_original = { .state = True, .level = 0, .standby = 600, .suspend = 600, .off = 600 };  // holds original values
 int dpms_timeout = 1000;  // dpms timeout until program exits
 Bool using_dpms;
+const int gccount = 5, whiteGC = 0, redGC = 1, blueGC = 2, greenGC = 3, yellowGC = 4, greyGC = 5;
 
 pam_handle_t *pam_handle;
 struct pam_conv conv = { conv_callback, NULL };
@@ -149,9 +162,128 @@ handle_signal(int sig) {
 }
 
 void
-main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char passdisp[256], char* username, XColor UNUSED(black), XColor white, XColor red, Bool hidelength) {
+position_rects(Rect* rects, int start_x, int start_y, int size, int gutter, int lights) {
+    int rows = 3;
+    int cols = 1;
+
+    if (lights == 6) {
+        cols = 2;
+    }
+    if (lights == 9) {
+        cols = 3;
+    }
+
+    for (int i = 0; i < cols; i++) {
+        for (int j = 0; j < rows; j++) {
+            rects[j*cols+i].x = i*(size+gutter) + start_x;
+            rects[j*cols+i].y = j*(size+gutter) + start_y;
+            rects[j*cols+i].size = size;
+        }
+    }
+}
+
+void
+enable_rects(Rect* rects, int n, int active_lights) {
+    if (active_lights > n) {
+        return;
+    }
+
+    while(active_lights) {
+        int x = rand() % n;
+        if (!rects[x].enabled) {
+            rects[x].enabled = True;
+            active_lights--;
+        }
+    }
+}
+
+void
+reset_rects(Rect* rects, int n) {
+    for (int i = 0; i < n; i++) {
+        rects[i].enabled = False;
+    }
+}
+
+void
+draw_rects(Rect* rects, Window w, int n, GC activeGC, GC inactiveGC) {
+    for (int i = 0; i < n; i++) {
+        if (rects[i].enabled) {
+            XFillRectangle(dpy, w, activeGC, rects[i].x, rects[i].y, rects[i].size, rects[i].size);
+        } else {
+            XFillRectangle(dpy, w, inactiveGC, rects[i].x, rects[i].y, rects[i].size, rects[i].size);
+        }
+    }
+}
+
+void
+run_clock(Amalgam *a) {
+    Window w = (*a).w;
+     GC *gcs = (*a).gcs;
+     WindowPositionInfo* info = (*a).info;
+     int line_x_left = (*a).line_x_left;
+     int base_y = (*a).base_y;
+
+    clock_t begin = -1e9;
+    double time_spent;
+    int clock_interval = 1;
+
+    int rect_size = info->output_width / 48;
+    int gutter = 10, inter_sections = 20;
+    int h1n = 3, h2n = 9, m1n = 6, m2n = 9;
+    int rects_x_left = line_x_left+10;
+    Rect *h1 = malloc(100*sizeof(Rect));
+    Rect *h2 = malloc(100*sizeof(Rect));
+    Rect *m1 = malloc(100*sizeof(Rect));
+    Rect *m2 = malloc(100*sizeof(Rect));
+
+    position_rects(h1, rects_x_left, base_y / 2, rect_size, gutter, h1n);
+    position_rects(h2, rects_x_left+rect_size+gutter+inter_sections, base_y / 2, rect_size, gutter, h2n);
+    position_rects(m1, rects_x_left+4*(rect_size+gutter)+2*inter_sections, base_y / 2, rect_size, gutter, m1n);
+    position_rects(m2, rects_x_left+6*(rect_size+gutter)+3*inter_sections, base_y / 2, rect_size, gutter, m2n);
+
+
+    while (1) {
+        time_spent = (double)(clock() - begin) / CLOCKS_PER_SEC*25;
+        if (time_spent>=clock_interval) {
+            time_t now;
+            struct tm *now_tm;
+            int hour, minute;
+            now = time(NULL);
+            now_tm = localtime(&now);
+            int tm_h2 = now_tm->tm_hour % 10;
+            int tm_h1 = now_tm->tm_hour / 10;
+            int tm_m2 = now_tm->tm_min % 10;
+            int tm_m1 = now_tm->tm_min / 10;
+
+            begin = clock();
+            reset_rects(h1, h1n);
+            draw_rects(h1, w, h1n, gcs[greyGC], gcs[greyGC]);
+            enable_rects(h1, h1n, tm_h1);
+            draw_rects(h1, w, h1n, gcs[redGC], gcs[greyGC]);
+
+            reset_rects(h2, h2n);
+            draw_rects(h2, w, h2n, gcs[greyGC], gcs[greyGC]);
+            enable_rects(h2, h2n, tm_h2);
+            draw_rects(h2, w, h2n, gcs[greenGC], gcs[greyGC]);
+
+            reset_rects(m1, m1n);
+            draw_rects(m1, w, m1n, gcs[greyGC], gcs[greyGC]);
+            enable_rects(m1, m1n, tm_m1);
+            draw_rects(m1, w, m1n, gcs[blueGC], gcs[greyGC]);
+
+            reset_rects(m2, m2n);
+            draw_rects(m2, w, m2n, gcs[greyGC], gcs[greyGC]);
+            enable_rects(m2, m2n, tm_m2);
+            draw_rects(m2, w, m2n, gcs[yellowGC], gcs[greyGC]);
+        }
+    }
+}
+
+void
+main_loop(Window w, GC gcs[], XFontStruct* font, WindowPositionInfo* info, char passdisp[256], char* username, XColor UNUSED(black), XColor white, XColor red, Bool hidelength) {
     XEvent event;
     KeySym ksym;
+    GC gc = gcs[whiteGC];
 
     unsigned int len = 0;
     Bool running = True;
@@ -176,6 +308,18 @@ main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char pas
         XTextExtents(font, passdisp, strlen(username), &dir, &ascent, &descent, &overall);
     }
 
+
+
+    Amalgam *a = malloc(sizeof(Amalgam));
+    pthread_t tid;
+    (*a).w = w;
+    (*a).gcs = gcs;
+    (*a).info = info;
+    (*a).base_y = base_y;
+    (*a).line_x_left = line_x_left;
+
+    pthread_create(&tid, NULL, &run_clock, a);
+
     /* main event loop */
     while(running && !XNextEvent(dpy, &event)) {
         if (sleepmode && using_dpms)
@@ -192,7 +336,6 @@ main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char pas
             XDrawLine(dpy, w, gc, line_x_right, base_y, info->output_width, 0);
 
             /* clear old passdisp */
-            //XClearArea(dpy, w, info->output_x, base_y + 20, info->output_width, ascent + descent, False);
 
             /* draw new passdisp or 'auth failed' */
             if (failed) {
@@ -205,7 +348,6 @@ main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char pas
                 if (hidelength && len > 0)
                     lendisp += (passdisp[len] * len) % 5;
                 x = base_x - XTextWidth(font, passdisp, lendisp) / 2;
-                // XDrawString(dpy, w, gc, x, base_y + ascent + 20, passdisp, lendisp % 256);
             }
         }
 
@@ -250,6 +392,7 @@ main_loop(Window w, GC gc, XFontStruct* font, WindowPositionInfo* info, char pas
             }
         }
     }
+    pthread_exit(&tid);
 }
 
 Bool
@@ -305,9 +448,11 @@ main(int argc, char** argv) {
 
     Cursor invisible;
     Window root, w;
-    XColor black, red, white;
+    XColor black, red, white, blue, green, yellow, grey;
     XFontStruct* font;
-    GC gc;
+
+    GC gcs[gccount];
+    memset(gcs, 0, gccount*sizeof(GC));
 
     /* get username (used for PAM authentication) */
     char* username;
@@ -398,6 +543,10 @@ main(int argc, char** argv) {
         XAllocNamedColor(dpy, cmap, "orange red", &red, &dummy);
         XAllocNamedColor(dpy, cmap, "black", &black, &dummy);
         XAllocNamedColor(dpy, cmap, "white", &white, &dummy);
+        XAllocNamedColor(dpy, cmap, "blue", &blue, &dummy);
+        XAllocNamedColor(dpy, cmap, "green", &green, &dummy);
+        XAllocNamedColor(dpy, cmap, "yellow", &yellow, &dummy);
+        XAllocNamedColor(dpy, cmap, "grey", &grey, &dummy);
     }
 
     /* create window */
@@ -420,12 +569,42 @@ main(int argc, char** argv) {
         XFreePixmap(dpy, pmap);
     }
 
-    /* create Graphics Context */
+    /* create Graphics Contexts */
     {
         XGCValues values;
-        gc = XCreateGC(dpy, w, (unsigned long)0, &values);
-        XSetFont(dpy, gc, font->fid);
-        XSetForeground(dpy, gc, white.pixel);
+        gcs[redGC] = XCreateGC(dpy, w, (unsigned long)0, &values);
+        XSetFont(dpy, gcs[redGC], font->fid);
+        XSetForeground(dpy, gcs[redGC], red.pixel);
+    }
+    {
+        XGCValues values;
+        gcs[whiteGC] = XCreateGC(dpy, w, (unsigned long)0, &values);
+        XSetFont(dpy, gcs[whiteGC], font->fid);
+        XSetForeground(dpy, gcs[whiteGC], white.pixel);
+    }
+    {
+        XGCValues values;
+        gcs[blueGC] = XCreateGC(dpy, w, (unsigned long)0, &values);
+        XSetFont(dpy, gcs[blueGC], font->fid);
+        XSetForeground(dpy, gcs[blueGC], blue.pixel);
+    }
+    {
+        XGCValues values;
+        gcs[greenGC] = XCreateGC(dpy, w, (unsigned long)0, &values);
+        XSetFont(dpy, gcs[greenGC], font->fid);
+        XSetForeground(dpy, gcs[greenGC], green.pixel);
+    }
+    {
+        XGCValues values;
+        gcs[yellowGC] = XCreateGC(dpy, w, (unsigned long)0, &values);
+        XSetFont(dpy, gcs[yellowGC], font->fid);
+        XSetForeground(dpy, gcs[yellowGC], yellow.pixel);
+    }
+    {
+        XGCValues values;
+        gcs[greyGC] = XCreateGC(dpy, w, (unsigned long)0, &values);
+        XSetFont(dpy, gcs[greyGC], font->fid);
+        XSetForeground(dpy, gcs[greyGC], grey.pixel);
     }
 
     /* grab pointer and keyboard */
@@ -472,7 +651,7 @@ main(int argc, char** argv) {
     }
 
     /* run main loop */
-    main_loop(w, gc, font, &info, passdisp, opt_username, black, white, red, opt_hidelength);
+    main_loop(w, gcs, font, &info, passdisp, opt_username, black, white, red, opt_hidelength);
 
     /* restore dpms settings */
     if (using_dpms) {
@@ -483,7 +662,7 @@ main(int argc, char** argv) {
 
     XUngrabPointer(dpy, CurrentTime);
     XFreeFont(dpy, font);
-    XFreeGC(dpy, gc);
+    XFreeGC(dpy, gcs[whiteGC]);
     XDestroyWindow(dpy, w);
     XCloseDisplay(dpy);
     return 0;

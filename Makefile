@@ -10,7 +10,7 @@ VERSION = 1.0
 
 CC := $(CC) -std=c99
 
-base_CFLAGS = -Wall -Wextra -pedantic -O2 -g
+base_CFLAGS = -pthread -Wall -Wextra -pedantic -O2 -g
 base_LIBS = -lpam
 
 pkgs = x11 xext xrandr
